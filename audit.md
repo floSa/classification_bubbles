@@ -1,21 +1,38 @@
 # 🔍 Audit du Projet "The Bubble Project"
 
-**Version** : Architecture v2.1 (Optimisation Temps Réel)
+**Version** : Architecture v2.2 (Signal physique réaliste + cache prédictions)
 
-## ✅ Problèmes Résolus (Janvier 2026)
+## ✅ Problèmes Résolus (Mai 2026)
 
-### 1. Stabilité Flux Temps Réel
-*   **Problème**: L'extraction bouclait à l'infini ("Tentative X/10") en cas de gap partiel de données (chunk incomplet pour toujours).
-*   **Solution**: Correction de la logique de reset du compteur de retry et implémentation d'une **détection de gap temporel** robuste.
-    *   Si donnée manquante > 10 tentatives : Saut automatique au temps présent.
-    *   Démarrage optimisé : Si aucun checkpoint, démarrage à `NOW - 30s` (évite le scan historique).
+### 1. Génération de signal trop triviale à classer
+*   **Problème**: Les paramètres physiques `(freq, intervalle, chaos)` étaient des **points fixes** par classe avec aucun chevauchement. Chaque feature seule séparait les 5 classes (freq 800→1200Hz monotone, densité 1.25→4 bulles/s monotone, noise std 0.01→0.11 monotone). Un humain distinguait 40 et 80 trivialement à l'œil sur le signal brut, et le CNN convergeait artificiellement à ~100% sans rien apprendre.
+*   **Solution**: Réécriture de `generate_signal()` :
+    *   Chaque classe est désormais une **distribution gaussienne** (moyennes + écarts-types) et non un point fixe. Les distributions de classes adjacentes **se chevauchent**.
+    *   Paramètres tirés stochastiquement à **chaque bulle** : fréquence, décroissance, amplitude, nombre d'harmoniques (1 à 4).
+    *   Bruit de fond **rose (1/f)** au lieu de blanc — plus réaliste pour de la turbulence d'écoulement.
+    *   Possibilité de **double-burst** (cavitation jumelée), probabilité croissante avec le bouchage.
+    *   Bruit de label optionnel via `LABEL_NOISE_RATE` pour simuler les erreurs capteur.
 
-### 2. Performance Dashboard
-*   **Problème**: Rafraîchissement saccadé toutes les 10s et blocage UI.
-*   **Solution**:
-    *   Réduction `BATCH_DURATION` extraction : **10s ➔ 1s**.
-    *   Timeout API Inference : **5s ➔ 0.5s**.
-    *   Désactivation de la boucle d'inférence en arrière-plan (inutile).
+### 2. Cache des prédictions
+*   **Problème**: Le dashboard appelait l'API inference à **chaque refresh (1 s)** pour la même bulle, même quand la prédiction avait déjà été calculée.
+*   **Solution**: L'API `/predict/{bubble_id}` lit puis écrit la prédiction dans MongoDB. Le dashboard lit le cache Mongo en priorité et n'appelle l'API que pour les bulles non encore prédites.
+
+### 3. Auto-reload du modèle dans l'inference
+*   **Problème**: Le modèle était chargé une seule fois au boot. Si Inference démarrait avant la fin du Training, il restait en mode dégradé indéfiniment.
+*   **Solution**: Watcher asynchrone qui surveille le `mtime` du `.pth` toutes les 5 s et recharge à chaud.
+
+### 4. Bugs PyTorch / data augmentation
+*   `torch.cuda.amp.GradScaler()` / `torch.cuda.amp.autocast()` → API non-deprecated `torch.amp.GradScaler("cuda")` / `torch.amp.autocast("cuda")`.
+*   Suppression de `RandomHorizontalFlip` sur les spectrogrammes : flip horizontal = inverser le temps, ce qui transforme une attaque exponentielle en queue exponentielle (signal physiquement impossible).
+*   `BubbleDataset.__getitem__` retournait silencieusement `(zeros, label=0)` en cas d'erreur S3, polluant le training. Remplacé par un skip vers l'échantillon suivant.
+
+### 5. Stabilité Flux Temps Réel (correctif antérieur)
+*   Détection de gap temporel : après 10 tentatives infructueuses, saut au temps présent.
+*   Démarrage sans checkpoint : `NOW - 30s` au lieu de scanner l'historique.
+
+### 6. Performance Dashboard (correctif antérieur)
+*   `BATCH_DURATION` extraction : 10 s → 1 s.
+*   Timeout API Inference : 5 s → 0.5 s.
 
 ---
 
@@ -114,9 +131,9 @@ Centralise le code partagé entre tous les services.
 
 | Module | Contenu |
 |--------|---------|
-| `config.py` | Constantes (SAMPLE_RATE, IMG_SIZE), classes de config (Timescale, Mongo, MinIO) |
+| `config.py` | Constantes (SAMPLE_RATE, IMG_SIZE), `BUBBLE_PARAMS` (distributions stochastiques), `LABEL_NOISE_RATE`, classes de config DB |
 | `db_connections.py` | Fonctions de connexion avec retry et backoff |
-| `signal_processing.py` | `generate_signal()`, `insert_batch()`, `is_db_populated()` |
+| `signal_processing.py` | `generate_signal()` (modèle physique), `insert_batch()` |
 
 ---
 
@@ -209,11 +226,11 @@ API REST pour les prédictions en temps réel.
 ## ✅ Points Forts
 
 1. **Package Common** : Code centralisé, maintenance simplifiée
-2. **API Inference** : FastAPI avec background polling automatique
-3. **GPU Support** : Training et Inference optimisés CUDA
+2. **API Inference** : FastAPI + watcher de modèle + cache MongoDB des prédictions
+3. **GPU Support** : Training et Inference optimisés CUDA (API `torch.amp` 2.x)
 4. **Backpressure** : Retry exponentiel sur MinIO
-5. **Tests** : Couverture des fonctions critiques
-6. **PyTorch 2.x** : API modernes, pas de deprecation warnings
+5. **Tests** : Couverture des fonctions critiques de signal et de spectrogramme
+6. **Signal physiquement plausible** : distributions stochastiques chevauchantes, bruit rose, harmoniques aléatoires — pas un jouet trivial
 
 ---
 
@@ -235,7 +252,7 @@ API REST pour les prédictions en temps réel.
 classification_bubbles/
 ├── .env                          # Variables d'environnement (NON versionné)
 ├── .env.example                  # Template (versionné)
-├── docker-compose.yml            # Orchestration 9 services
+├── docker-compose.yml            # Orchestration 10 services (4 infra + 6 apps)
 ├── README.md                     # Documentation principale
 ├── STORAGE.md                    # Documentation stockage
 ├── audit.md                      # [CE FICHIER]

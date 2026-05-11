@@ -56,15 +56,10 @@ def get_last_checkpoint(db, pg_conn):
     if state:
         return state["last_processed_timestamp"].replace(tzinfo=timezone.utc)
     
-    # Si aucun état, on ne cherche PAS dans tout l'historique (trop lent)
-    # On assume qu'on veut reprendre le flux temps réel
-    # On prend une marge de sécurité de 30 secondes en arrière
-    
+    # Si aucun état, on ne cherche PAS dans tout l'historique (trop lent).
+    # On reprend le flux temps réel avec une marge de sécurité de 30 secondes.
     logger.warning("⚠️ Aucun checkpoint trouvé. Démarrage au temps actuel - 30s.")
     return datetime.now(timezone.utc) - timedelta(seconds=30)
-    
-    # Fallback final (ne devrait pas être atteint avec le return ci-dessus)
-    return datetime.now(timezone.utc)
 
 
 def update_checkpoint(db, new_timestamp):

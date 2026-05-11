@@ -211,30 +211,29 @@ def train_model():
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
     
-    # Mixed Precision Training
-    scaler = torch.cuda.amp.GradScaler() if torch.cuda.is_available() else None
+    # Mixed Precision Training (API PyTorch 2.x non-deprecated)
+    use_amp = torch.cuda.is_available()
+    scaler = torch.amp.GradScaler("cuda") if use_amp else None
 
     # 3. Boucle d'entraînement
     best_acc = 0.0
-    
+
     for epoch in range(EPOCHS):
         model.train()
         running_loss = 0.0
         correct = 0
         total = 0
-        
+
         for inputs, labels in train_loader:
             inputs, labels = inputs.to(device), labels.to(device)
-            
+
             optimizer.zero_grad()
-            
-            # Forward pass avec AMP
-            if scaler is not None:
-                with torch.cuda.amp.autocast():
+
+            if use_amp:
+                with torch.amp.autocast("cuda"):
                     outputs = model(inputs)
                     loss = criterion(outputs, labels)
-                
-                # Backward pass avec scaler
+
                 scaler.scale(loss).backward()
                 scaler.step(optimizer)
                 scaler.update()

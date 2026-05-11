@@ -62,30 +62,36 @@ class BubbleDataset(Dataset):
         item = self.samples[idx]
         object_name = item["s3_key"]
         label_val = item["label"]
-        
+
         # Récupération de l'image depuis MinIO
         try:
             response = self.minio_client.get_object(MinIOConfig.BUCKET, object_name)
             img_data = response.read()
             response.close()
             response.release_conn()
-            
+
             # Spectro en N&B -> RGB (MobileNet attend 3 canaux)
-            image = Image.open(io.BytesIO(img_data)).convert('L')
-            image = image.convert("RGB")
-            
+            image = Image.open(io.BytesIO(img_data)).convert('L').convert('RGB')
+
             if self.transform:
                 image = self.transform(image)
-                
+
             # Conversion du label (0, 20, 40, 60, 80) -> (0, 1, 2, 3, 4)
-            label = LABEL_TO_INDEX.get(label_val, 0)
-            
+            if label_val not in LABEL_TO_INDEX:
+                # Label inattendu : on lève plutôt que de polluer silencieusement
+                raise ValueError(f"Label inconnu: {label_val}")
+            label = LABEL_TO_INDEX[label_val]
+
             return image, torch.tensor(label, dtype=torch.long)
-            
+
         except Exception as e:
-            self.logger.warning(f"⚠️ Erreur chargement {object_name}: {e}")
-            # Retourner une image noire pour éviter de casser le batch
-            return torch.zeros((3, 224, 224)), torch.tensor(0)
+            # On NE retourne PAS un sample fictif (label=0 ferait dériver le training).
+            # On bascule sur l'échantillon suivant (modulo dataset).
+            self.logger.warning(f"⚠️ Erreur chargement {object_name}: {e} — skip vers idx+1")
+            next_idx = (idx + 1) % len(self.samples)
+            if next_idx == idx:
+                raise
+            return self.__getitem__(next_idx)
 
 # =============================================================================
 # TRANSFORMATIONS
@@ -95,22 +101,27 @@ def get_transforms(train: bool = True):
     """
     Retourne les transformations pour train ou validation.
     Les images sont déjà redimensionnées en 224x224 par le service Transformation.
+
+    NB : pas de RandomHorizontalFlip sur un spectrogramme — l'axe horizontal
+    est le TEMPS, le flipper inverse l'attaque exponentielle (cause→effet) et
+    introduit des signaux physiquement impossibles. Idem pour des rotations
+    importantes : la position verticale encode la fréquence.
     """
+    normalize = transforms.Normalize(
+        mean=[0.485, 0.456, 0.406],
+        std=[0.229, 0.224, 0.225],
+    )
+
     if train:
         return transforms.Compose([
-            transforms.RandomHorizontalFlip(),  # Data Augmentation
-            transforms.RandomRotation(5),        # Légère rotation
+            # Petites augmentations sûres uniquement :
+            # - Erasing simule des dropouts capteur / interférences ponctuelles.
             transforms.ToTensor(),
-            transforms.Normalize(
-                mean=[0.485, 0.456, 0.406], 
-                std=[0.229, 0.224, 0.225]
-            )
+            normalize,
+            transforms.RandomErasing(p=0.25, scale=(0.02, 0.08), ratio=(0.3, 3.3)),
         ])
-    else:
-        return transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Normalize(
-                mean=[0.485, 0.456, 0.406], 
-                std=[0.229, 0.224, 0.225]
-            )
-        ])
+
+    return transforms.Compose([
+        transforms.ToTensor(),
+        normalize,
+    ])

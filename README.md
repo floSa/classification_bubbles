@@ -33,6 +33,12 @@ Ce projet simule une usine, génère des données de capteurs (audio), les trait
     *   Sous WSL2 : Installer les [drivers NVIDIA pour WSL](https://developer.nvidia.com/cuda/wsl).
 *   Un fichier `.env` configuré (voir `.env.example`).
 
+### Variables d'environnement notables
+| Variable | Défaut | Effet |
+|----------|--------|-------|
+| `LABEL_NOISE_RATE` | `0.0` | Probabilité par chunk de stocker un mauvais label (simule un capteur imparfait). 0.03–0.05 = réaliste. |
+| `FORCE_CLEAN` | `false` | Si `true` au démarrage de `acquisition`, purge `audio_data` et supprime le modèle entraîné. À n'utiliser que pour repartir de zéro. |
+
 ### Configuration initiale (WSL2)
 ```bash
 # Copier le fichier d'environnement
@@ -86,13 +92,21 @@ docker compose --profile training up -d --build
 
 ## 🛠️ Détails Techniques
 *   **Package Common**: Code partagé entre services (connexions DB, config, signal processing).
-*   **Temps Réel Ultra-Faible Latence**: 
+*   **Temps Réel Ultra-Faible Latence**:
     *   Acquisition et Extraction : Batch de **1.0 seconde** pour une fluidité maximale.
     *   Inference : Timeout optimisé (0.5s) et polling à la demande.
 *   **Optimisation**: Données audio en `float16`, spectrogrammes 224×224, décimation x11.
 *   **Rétention**: TimescaleDB configuré avec politique de 24h.
 *   **GPU**: Training et Inference utilisent CUDA via images PyTorch officielles.
 *   **Backpressure**: Retry exponentiel sur MinIO pour gérer la surcharge.
+
+## 🧪 Modèle physique de simulation
+
+Les 5 classes (0/20/40/60/80% de bouchage) ne sont **pas** des points fixes : chaque classe est une **distribution stochastique** sur plusieurs paramètres (fréquence fondamentale, intervalle inter-bulles, taux de décroissance, nombre d'harmoniques, amplitude, bruit de fond rose). Les distributions de classes adjacentes se **chevauchent** délibérément.
+
+Conséquence : aucune feature scalaire ne sépare les classes seule. Le modèle doit apprendre une représentation conjointe sur le spectrogramme. Voir [services/common/config.py](services/common/config.py) (`BUBBLE_PARAMS`) et [services/common/signal_processing.py](services/common/signal_processing.py).
+
+Pour rendre le problème encore plus réaliste, activer `LABEL_NOISE_RATE=0.03` dans le `.env`.
 
 ## 🧪 Tests
 ```bash
