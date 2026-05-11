@@ -1,0 +1,6 @@
+psycopg2-binary
+numpy
+scipy
+pymongo
+minio
+python-dotenv

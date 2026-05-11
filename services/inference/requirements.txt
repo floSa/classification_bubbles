@@ -1,0 +1,10 @@
+psycopg2-binary
+fastapi
+uvicorn[standard]
+torch>=2.0.0
+torchvision>=0.15.0
+numpy
+pymongo
+minio
+Pillow
+python-dotenv

@@ -1,0 +1,9 @@
+streamlit
+streamlit-autorefresh
+pandas
+psycopg2-binary
+pymongo
+minio
+Pillow
+python-dotenv
+requests
