@@ -14,7 +14,7 @@ help:  ## Affiche cette aide
 train:  ## Mode 1 : reset complet (volumes + modèle) + génération + entraînement
 	@echo "♻️  Reset complet des volumes et du modèle..."
 	docker compose --profile training down -v
-	rm -f models/*.pth models/*.json
+	@$(MAKE) --no-print-directory _clean_models
 	@echo "🚀 Démarrage avec génération + training..."
 	docker compose --profile training up -d --build
 	@echo ""
@@ -35,7 +35,13 @@ stop:  ## Arrête tous les conteneurs (préserve les volumes et le modèle)
 
 clean:  ## Suppression complète : volumes + modèle + fichiers de progression
 	docker compose --profile training down -v
-	rm -f models/*.pth models/*.json
+	@$(MAKE) --no-print-directory _clean_models
+
+# Cible interne : supprime models/*.pth et *.json en passant par un conteneur
+# root pour contourner le cas WSL2 où ces fichiers ont été créés en root par
+# les services Docker et sont non-supprimables par l'utilisateur courant.
+_clean_models:
+	@docker run --rm -v "$(CURDIR)/models:/m" alpine sh -c "rm -f /m/*.pth /m/*.json" 2>/dev/null || true
 
 logs:  ## Suit les logs du service de training en direct
 	docker logs -f bubble_training
