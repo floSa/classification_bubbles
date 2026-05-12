@@ -174,27 +174,35 @@ def render_training_mode():
     st.subheader("🔄 Phase 2 : Entraînement du Modèle")
     
     train_prog = load_json_file(TRAINING_PROGRESS_FILE)
-    
+
     if train_prog:
         current_epoch = train_prog.get("current_epoch", 0)
-        total_epochs = train_prog.get("total_epochs", 10)
+        total_epochs = train_prog.get("total_epochs", 0) or 10  # fallback raisonnable
         status = train_prog.get("status", "unknown")
-        
-        progress_val = min(current_epoch / total_epochs, 1.0) if total_epochs > 0 else 0.0
-        
-        st.progress(progress_val)
-        st.caption(f"Epoch {current_epoch} / {total_epochs} ({progress_val * 100:.0f}%)")
-        
+
+        # La barre d'epoch n'a de sens qu'une fois le training réellement lancé.
+        # Avant (waiting_data / starting), on affiche uniquement l'état courant
+        # pour ne pas montrer une fausse barre "Epoch 0 / 0".
+        if status in ("training", "completed"):
+            progress_val = min(current_epoch / total_epochs, 1.0) if total_epochs > 0 else 0.0
+            st.progress(progress_val)
+            st.caption(f"Epoch {current_epoch} / {total_epochs} ({progress_val * 100:.0f}%)")
+
         if status == "completed":
             st.success("✅ Entraînement terminé ! Redirection...")
         elif status == "training":
-            st.info(f"🔄 Entraînement en cours... (Loss: {train_prog.get('loss', 0):.4f})")
+            loss = train_prog.get("loss", 0)
+            val_acc = train_prog.get("val_acc")
+            line = f"🔄 Entraînement en cours... (Loss: {loss:.4f}"
+            if val_acc is not None:
+                line += f", Val Acc: {val_acc * 100:.1f}%"
+            line += ")"
+            st.info(line)
         elif status == "waiting_data":
             msg = train_prog.get("message", "")
-            # On évite de dupliquer l'info de la barre Phase 1 : si le training
-            # attend juste la fin de l'acquisition, on affiche un message
-            # générique. En revanche, l'avancée de la transformation des
-            # spectrogrammes est une étape distincte et utile à voir ici.
+            # Phase 1 montre déjà l'avancée de l'acquisition.
+            # Ici on n'affiche que ce qui apporte de l'info nouvelle :
+            # la transformation des spectrogrammes (étape 2 du training).
             if msg.startswith("Transformation"):
                 st.info(f"⏳ {msg}")
             elif msg.startswith("Acquisition"):
@@ -206,7 +214,6 @@ def render_training_mode():
         else:
             st.info(f"Statut : {status}")
     else:
-        # Si la génération n'est pas finie, le training n'a pas commencé
         if acq_prog.get("status") != "completed":
             st.caption("🔒 En attente de la fin de la génération...")
         else:
