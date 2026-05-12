@@ -13,6 +13,12 @@ build/
 # Models binaires lourds
 models/*.pth
 
+# Outils d'assistance (sessions locales, configs IDE, worktrees temporaires)
+.claude/
+CLAUDE.md
+.cursor/
+.aider*
+
 # OS
 .DS_Store
 Thumbs.db

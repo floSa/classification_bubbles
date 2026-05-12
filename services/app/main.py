@@ -248,37 +248,37 @@ def render_realtime_mode():
         else:
             st.warning("Aucun spectrogramme")
     
-    # --- Prédiction via API Inference ---
+    # --- Prédiction (cache MongoDB en priorité, API en fallback) ---
     bubble_id = bubble.get("_id")
     label = bubble.get("label", "?")
-    
+
     st.markdown("---")
     col_p1, col_p2 = st.columns(2)
-    
+
     with col_p1:
         st.metric("Label Réel (Taux de bouchage)", f"{label}%")
-    
+
     with col_p2:
-        # Essayer d'obtenir la prédiction depuis l'API inference
-        if bubble_id:
+        # 1) Prédiction déjà en cache Mongo -> on l'affiche sans appeler l'API.
+        mongo_pred = bubble.get("prediction")
+        if mongo_pred and "label" in mongo_pred:
+            st.metric(
+                "Prédiction",
+                f"{mongo_pred.get('label')}%",
+                delta=f"{mongo_pred.get('confidence', 0) * 100:.0f}% confiance",
+            )
+        elif bubble_id:
+            # 2) Sinon on appelle l'API (qui écrira le résultat en cache pour
+            #    les prochains refresh).
             prediction = get_prediction_from_inference(bubble_id)
             if prediction:
                 st.metric(
-                    "Prédiction", 
-                    f"{prediction.get('predicted_label', '?')}", 
-                    delta=f"{prediction.get('confidence', 0) * 100:.0f}% confiance"
+                    "Prédiction",
+                    f"{prediction.get('predicted_label', '?')}",
+                    delta=f"{prediction.get('confidence', 0) * 100:.0f}% confiance",
                 )
             else:
-                # Fallback: utiliser la prédiction stockée dans MongoDB (si existe)
-                mongo_pred = bubble.get("prediction")
-                if mongo_pred:
-                    st.metric(
-                        "Prédiction", 
-                        f"{mongo_pred.get('label')}%",
-                        delta=f"{mongo_pred.get('confidence', 0) * 100:.0f}% confiance"
-                    )
-                else:
-                    st.metric("Prédiction", "⏳ En attente")
+                st.metric("Prédiction", "⏳ En attente")
         else:
             st.metric("Prédiction", "⏳ En attente")
     

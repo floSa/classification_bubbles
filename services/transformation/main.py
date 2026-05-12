@@ -8,7 +8,7 @@ import time
 import logging
 import sys
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -79,7 +79,7 @@ def main():
                                 "s3_bucket": MinIOConfig.BUCKET,
                                 "s3_key": object_name,
                                 "s3_url": f"http://{MinIOConfig.ENDPOINT}/{MinIOConfig.BUCKET}/{object_name}",
-                                "processed_at": datetime.utcnow(),
+                                "processed_at": datetime.now(timezone.utc),
                                 "spectro_stats": {"min_db": float(db_min), "max_db": float(db_max)},
                                 "fft_data": fft_data
                             }

@@ -7,14 +7,31 @@ import sys
 import os
 import time
 import json
+import random
 import logging
 from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from common.config import CHUNK_DURATION, DECIMATE_FACTOR, SAMPLE_RATE, CLOGGING_LEVELS
+from common.config import (
+    CHUNK_DURATION,
+    DECIMATE_FACTOR,
+    SAMPLE_RATE,
+    CLOGGING_LEVELS,
+    LABEL_NOISE_RATE,
+)
 from common.db_connections import get_timescale_connection
 from common.signal_processing import generate_signal, insert_batch
+
+
+def _noisy_label(true_level: int) -> int:
+    """Voir realtime_stream._noisy_label — duplique pour éviter un import cyclique."""
+    if LABEL_NOISE_RATE <= 0:
+        return true_level
+    if random.random() >= LABEL_NOISE_RATE:
+        return true_level
+    others = [lv for lv in CLOGGING_LEVELS if lv != true_level]
+    return random.choice(others) if others else true_level
 
 # Logger spécifique
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -132,18 +149,19 @@ def run():
                 counter = 0
             
             level = CLOGGING_LEVELS[level_idx]
-            
+            stored_label = _noisy_label(level)
+
             # Génération
             _, signal = generate_signal(level, CHUNK_DURATION)
-            
+
             # Préparation
             reduced_sig = signal[::DECIMATE_FACTOR]
             time_step = 1.0 / (SAMPLE_RATE / DECIMATE_FACTOR)
             base_ts = virtual_clock.timestamp()
-            
+
             for i, val in enumerate(reduced_sig):
                 ts = datetime.fromtimestamp(base_ts + i * time_step, timezone.utc)
-                buffer.append((ts, float(val), int(level)))
+                buffer.append((ts, float(val), int(stored_label)))
             
             if len(buffer) >= BATCH:
                 insert_batch(conn, buffer)

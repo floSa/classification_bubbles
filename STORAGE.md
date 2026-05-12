@@ -46,7 +46,7 @@ SELECT add_retention_policy('audio_data', INTERVAL '24 hours');
 | Collection | Contenu |
 |------------|---------|
 | `bubbles` | Événements audio + spectrogrammes + prédictions |
-| `extraction_state` | Curseurs de position pour reprise (Gap detection) |
+| `state_checkpoints` | Curseurs de position pour reprise (Gap detection) |
 
 ### Document Type (bubbles)
 ```json

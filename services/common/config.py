@@ -32,18 +32,61 @@ IMG_SIZE = (224, 224)
 # =============================================================================
 # PARAMÈTRES PHYSIQUES DES BULLES (Modèle de simulation)
 # =============================================================================
+#
+# Chaque classe est une DISTRIBUTION (moyennes + écarts-types) et non un point
+# fixe. Les distributions de classes adjacentes se chevauchent volontairement
+# pour forcer le classifieur à apprendre une représentation conjointe plutôt
+# qu'à exploiter une feature unique trivialement séparable.
+#
+# Champs:
+#   freq_mean / freq_std        : fréquence fondamentale d'une bulle (Hz, gauss.)
+#   interval_mean / interval_std: intervalle entre deux bulles (s, gauss.)
+#   decay_mean / decay_std      : taux de décroissance de l'enveloppe exp (1/s)
+#   harmonics_range             : (min, max) inclus, nombre d'harmoniques ajoutés
+#   noise_std                   : écart-type du bruit de fond coloré (pink)
+#   amp_jitter                  : variation d'amplitude par bulle (± fraction)
+#   double_prob                 : probabilité d'un "double burst" (cavitation jumelée)
 
-# Mapping niveau de bouchage -> (fréquence_base, intervalle_bulles, indice_chaos)
 BUBBLE_PARAMS = {
-    0:  (800, 0.8, 0.02),   # Normal : bulles lentes, basse fréquence, très stable
-    20: (850, 0.70, 0.05),  # Léger : légère augmentation
-    40: (920, 0.55, 0.10),  # Modéré : bulles plus fréquentes
-    60: (1050, 0.40, 0.15), # Sévère : haute fréquence, chaos modéré
-    80: (1200, 0.25, 0.20)  # Critique : très haute fréquence, chaos contrôlé
+    0:  {"freq_mean": 850,  "freq_std": 130,
+         "interval_mean": 0.60, "interval_std": 0.18,
+         "decay_mean": 22.0, "decay_std": 4.0,
+         "harmonics_range": (0, 1),
+         "noise_std": 0.045, "amp_jitter": 0.30,
+         "double_prob": 0.05},
+    20: {"freq_mean": 900,  "freq_std": 150,
+         "interval_mean": 0.50, "interval_std": 0.17,
+         "decay_mean": 20.0, "decay_std": 5.0,
+         "harmonics_range": (0, 2),
+         "noise_std": 0.052, "amp_jitter": 0.35,
+         "double_prob": 0.07},
+    40: {"freq_mean": 970,  "freq_std": 170,
+         "interval_mean": 0.42, "interval_std": 0.15,
+         "decay_mean": 18.0, "decay_std": 5.0,
+         "harmonics_range": (1, 2),
+         "noise_std": 0.060, "amp_jitter": 0.40,
+         "double_prob": 0.10},
+    60: {"freq_mean": 1040, "freq_std": 180,
+         "interval_mean": 0.34, "interval_std": 0.12,
+         "decay_mean": 16.0, "decay_std": 6.0,
+         "harmonics_range": (1, 3),
+         "noise_std": 0.068, "amp_jitter": 0.45,
+         "double_prob": 0.13},
+    80: {"freq_mean": 1110, "freq_std": 200,
+         "interval_mean": 0.28, "interval_std": 0.10,
+         "decay_mean": 14.0, "decay_std": 6.0,
+         "harmonics_range": (1, 3),
+         "noise_std": 0.075, "amp_jitter": 0.50,
+         "double_prob": 0.18},
 }
 
 # Labels disponibles (niveaux de bouchage en %)
 CLOGGING_LEVELS = [0, 20, 40, 60, 80]
+
+# Taux de bruit de label (0..1) : fraction de chunks dont le label stocké
+# diffère de la classe réelle utilisée pour la génération. Utile pour stresser
+# le modèle et éviter une val_acc artificielle à 100%.
+LABEL_NOISE_RATE = float(os.getenv("LABEL_NOISE_RATE", "0.0"))
 
 # Mapping label -> index pour le modèle ML
 LABEL_TO_INDEX = {0: 0, 20: 1, 40: 2, 60: 3, 80: 4}

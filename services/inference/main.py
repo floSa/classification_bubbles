@@ -1,46 +1,54 @@
 # Service Inference - API de prédiction
 """
 API REST FastAPI pour l'inférence en temps réel.
-Charge le modèle entraîné et prédit le niveau de bouchage
-pour les nouvelles bulles détectées.
+Charge le modèle entraîné et prédit le niveau de bouchage pour les bulles.
+
+Particularités :
+- Le modèle est rechargé automatiquement s'il apparaît ou est mis à jour
+  après le démarrage du service (utile : training et inference tournent en
+  parallèle, le fichier .pth peut arriver après le boot de l'API).
+- Les prédictions sont écrites dans MongoDB (cache) pour éviter qu'un client
+  ré-interroge l'API à chaque rafraîchissement pour la même bulle.
 """
 
 import os
 import io
-import time
 import logging
 import asyncio
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 
 import torch
-import torch.nn as nn
-from torchvision import models
 from PIL import Image
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from common.config import MinIOConfig, MongoConfig, INDEX_TO_LABEL
+from common.config import MinIOConfig, INDEX_TO_LABEL
 from common.db_connections import get_mongo_collection, get_minio_client
 from utils import load_model, preprocess_image, MODELS_DIR, MODEL_FILENAME
 
 logging.basicConfig(
-    level=logging.INFO, 
+    level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger("Inference_Service")
 
 # =============================================================================
-# VARIABLES GLOBALES
+# ÉTAT GLOBAL
 # =============================================================================
 
 model = None
+model_mtime = 0.0          # mtime du .pth chargé en mémoire
 device = None
 minio_client = None
 mongo_col = None
+
+MODEL_PATH = os.path.join(MODELS_DIR, MODEL_FILENAME)
+MODEL_WATCH_INTERVAL_S = 5  # période de surveillance du .pth
+
 
 # =============================================================================
 # MODÈLES PYDANTIC
@@ -59,47 +67,88 @@ class PredictionResponse(BaseModel):
     confidence: float
     timestamp: str
 
+
+# =============================================================================
+# CHARGEMENT / RECHARGEMENT DU MODÈLE
+# =============================================================================
+
+def _file_mtime(path: str) -> float:
+    try:
+        return os.path.getmtime(path)
+    except OSError:
+        return 0.0
+
+
+def try_reload_model() -> bool:
+    """
+    Recharge le modèle si le fichier .pth est apparu ou a été mis à jour
+    depuis le dernier chargement. Retourne True si un (re)chargement a eu lieu.
+    """
+    global model, model_mtime
+
+    current_mtime = _file_mtime(MODEL_PATH)
+    if current_mtime == 0.0:
+        return False
+    if model is not None and current_mtime <= model_mtime:
+        return False
+
+    new_model = load_model(device)
+    if new_model is None:
+        return False
+
+    model = new_model
+    model_mtime = current_mtime
+    logger.info(f"✅ Modèle (re)chargé depuis {MODEL_PATH} (mtime={current_mtime})")
+    return True
+
+
+async def model_watcher_loop():
+    """Vérifie périodiquement si un nouveau modèle est disponible."""
+    while True:
+        try:
+            try_reload_model()
+        except Exception as e:
+            logger.error(f"Erreur watcher modèle: {e}")
+        await asyncio.sleep(MODEL_WATCH_INTERVAL_S)
+
+
 # =============================================================================
 # LIFECYCLE
 # =============================================================================
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Gestion du cycle de vie de l'application."""
-    global model, device, minio_client, mongo_col
-    
+    global device, minio_client, mongo_col
+
     logger.info("🚀 Initialisation du service d'inférence...")
-    
-    # Configuration du device
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info(f"🖥️ Device: {device}")
-    
-    # Chargement du modèle
-    model = load_model(device)
-    if model is None:
-        logger.warning("⚠️ Aucun modèle trouvé. Le service fonctionnera en mode dégradé.")
+
+    if try_reload_model():
+        logger.info("✅ Modèle initial chargé")
     else:
-        logger.info("✅ Modèle chargé avec succès")
-    
-    # Connexions aux bases
+        logger.warning("⚠️ Aucun modèle au démarrage — surveillance activée.")
+
     minio_client = get_minio_client(ensure_bucket=False)
     mongo_col = get_mongo_collection()
-    
-    # Démarrage du background polling
-    # DÉSACTIVÉ: L'inférence se fait à la demande via l'API par Streamlit
-    # asyncio.create_task(background_inference_loop())
-    
-    yield
-    
-    logger.info("👋 Arrêt du service d'inférence")
+
+    watcher_task = asyncio.create_task(model_watcher_loop())
+
+    try:
+        yield
+    finally:
+        watcher_task.cancel()
+        logger.info("👋 Arrêt du service d'inférence")
 
 
 app = FastAPI(
     title="Bubble Inference API",
     description="API de prédiction du niveau de bouchage industriel",
-    version="1.0.0",
-    lifespan=lifespan
+    version="1.1.0",
+    lifespan=lifespan,
 )
+
 
 # =============================================================================
 # ENDPOINTS
@@ -107,162 +156,102 @@ app = FastAPI(
 
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
-    """Vérification de l'état du service."""
     return HealthResponse(
         status="ok",
         model_loaded=model is not None,
-        device=str(device) if device else "unknown"
+        device=str(device) if device else "unknown",
     )
 
 
 @app.get("/predict/{bubble_id}", response_model=PredictionResponse)
 async def predict_single(bubble_id: str):
     """
-    Effectue une prédiction pour une bulle spécifique.
-    
-    Args:
-        bubble_id: ID MongoDB de la bulle
+    Prédiction pour une bulle donnée.
+
+    Si une prédiction est déjà stockée dans MongoDB on la renvoie sans
+    refaire passer l'image dans le modèle (cache implicite).
     """
     if model is None:
+        # Tentative de chargement à la volée au cas où le fichier vient d'arriver
+        try_reload_model()
+    if model is None:
         raise HTTPException(status_code=503, detail="Modèle non chargé")
-    
+
     from bson import ObjectId
-    
+
     try:
-        # Récupération du document
         doc = mongo_col.find_one({"_id": ObjectId(bubble_id)})
         if not doc:
             raise HTTPException(status_code=404, detail="Bulle non trouvée")
-        
+
+        # Cache : si la bulle a déjà été prédite, ne pas recalculer
+        cached = doc.get("prediction")
+        if cached and "class" in cached and "confidence" in cached:
+            return PredictionResponse(
+                bubble_id=bubble_id,
+                predicted_class=cached["class"],
+                predicted_label=f"{INDEX_TO_LABEL[cached['class']]}%",
+                confidence=float(cached["confidence"]),
+                timestamp=(cached.get("predicted_at") or datetime.now(timezone.utc)).isoformat(),
+            )
+
         s3_key = doc.get("s3_key")
         if not s3_key:
             raise HTTPException(status_code=400, detail="Spectrogramme non disponible")
-        
-        # Chargement et prédiction
-        predicted_class, confidence = await asyncio.to_thread(
-            predict_from_s3, s3_key
-        )
-        
+
+        predicted_class, confidence = await asyncio.to_thread(predict_from_s3, s3_key)
+
+        now = datetime.now(timezone.utc)
+        # Persist en cache pour les prochains appels
+        try:
+            mongo_col.update_one(
+                {"_id": doc["_id"]},
+                {"$set": {"prediction": {
+                    "class": predicted_class,
+                    "label": INDEX_TO_LABEL[predicted_class],
+                    "confidence": float(confidence),
+                    "predicted_at": now,
+                }}},
+            )
+        except Exception as e:
+            logger.warning(f"Impossible de cacher la prédiction pour {bubble_id}: {e}")
+
         return PredictionResponse(
             bubble_id=bubble_id,
             predicted_class=predicted_class,
             predicted_label=f"{INDEX_TO_LABEL[predicted_class]}%",
-            confidence=confidence,
-            timestamp=datetime.utcnow().isoformat()
+            confidence=float(confidence),
+            timestamp=now.isoformat(),
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Erreur prédiction: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 # =============================================================================
-# FONCTIONS DE PRÉDICTION
+# INFÉRENCE
 # =============================================================================
 
 def predict_from_s3(s3_key: str) -> tuple[int, float]:
-    """
-    Charge une image depuis MinIO et effectue la prédiction.
-    
-    Returns:
-        Tuple (classe_prédite, score_confiance)
-    """
-    # Récupération de l'image
+    """Charge un spectrogramme depuis MinIO et effectue la prédiction."""
     response = minio_client.get_object(MinIOConfig.BUCKET, s3_key)
     img_data = response.read()
     response.close()
     response.release_conn()
-    
-    # Prétraitement
+
     image = Image.open(io.BytesIO(img_data)).convert('L').convert('RGB')
     tensor = preprocess_image(image).unsqueeze(0).to(device)
-    
-    # Inférence
+
     model.eval()
     with torch.no_grad():
         outputs = model(tensor)
         probabilities = torch.softmax(outputs, dim=1)
         confidence, predicted = torch.max(probabilities, 1)
-    
+
     return predicted.item(), confidence.item()
-
-# =============================================================================
-# BACKGROUND INFERENCE LOOP
-# =============================================================================
-
-async def background_inference_loop():
-    """
-    Boucle de fond qui poll MongoDB pour traiter automatiquement
-    les nouvelles bulles sans prédiction.
-    """
-    global model  # Déclaration explicite au début
-    logger.info("🔄 Démarrage du background polling...")
-    
-    while True:
-        try:
-            # Rechargement automatique du modèle si absent
-            if model is None:
-                # On essaie de recharger
-                loaded = load_model(device)
-                if loaded:
-                    model = loaded
-                    logger.info("✅ Modèle détecté et chargé dynamiquement !")
-                else:
-                    # Toujours pas de modèle, on attend
-                    await asyncio.sleep(5)
-                    continue
-            
-            # Recherche des bulles traitées mais sans prédiction
-            query = {
-                "processed": True,
-                "s3_key": {"$exists": True},
-                "prediction": {"$exists": False}
-            }
-            
-            cursor = mongo_col.find(query).limit(20)
-            count = 0
-            
-            for doc in cursor:
-                try:
-                    s3_key = doc.get("s3_key")
-                    if not s3_key:
-                        continue
-                    
-                    # Prédiction
-                    # predict_from_s3 utilise 'model' qui est global
-                    predicted_class, confidence = await asyncio.to_thread(
-                        predict_from_s3, s3_key
-                    )
-                    
-                    # Mise à jour MongoDB
-                    mongo_col.update_one(
-                        {"_id": doc["_id"]},
-                        {
-                            "$set": {
-                                "prediction": {
-                                    "class": predicted_class,
-                                    "label": INDEX_TO_LABEL[predicted_class],
-                                    "confidence": confidence,
-                                    "predicted_at": datetime.utcnow()
-                                }
-                            }
-                        }
-                    )
-                    count += 1
-                    
-                except Exception as e:
-                    logger.error(f"Erreur traitement bulle {doc.get('_id')}: {e}")
-
-            
-            if count > 0:
-                logger.info(f"🔮 {count} prédictions effectuées")
-            
-            await asyncio.sleep(2)  # Poll toutes les 2 secondes
-            
-        except Exception as e:
-            logger.error(f"Erreur dans la boucle de background: {e}")
-            await asyncio.sleep(5)
 
 
 if __name__ == "__main__":

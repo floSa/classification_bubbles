@@ -75,3 +75,41 @@ def test_all_clogging_levels():
     for level in CLOGGING_LEVELS:
         t, signal = generate_signal(level, 0.1)
         assert len(signal) > 0, f"Niveau {level} devrait produire un signal"
+
+
+def test_generate_signal_is_stochastic():
+    """
+    Deux appels successifs au même niveau doivent produire des signaux
+    différents (sinon le modèle de classes redevient déterministe).
+    """
+    _, sig_a = generate_signal(40, 1.0)
+    _, sig_b = generate_signal(40, 1.0)
+    # Les signaux sont en float16 mais on compare comme arrays
+    diff_ratio = np.mean(sig_a.astype(np.float32) != sig_b.astype(np.float32))
+    assert diff_ratio > 0.5, "Deux générations doivent être stochastiquement différentes"
+
+
+def test_generate_signal_class_distributions_overlap():
+    """
+    Vérifie que les distributions de classes adjacentes se chevauchent en
+    fréquence dominante (sinon le problème de classification est trivial).
+    On regarde la fréquence du pic spectral sur plusieurs tirages.
+    """
+    from common.config import SAMPLE_RATE
+
+    def dominant_freq(sig: np.ndarray) -> float:
+        sig32 = sig.astype(np.float32)
+        spectrum = np.abs(np.fft.rfft(sig32))
+        freqs = np.fft.rfftfreq(len(sig32), d=1.0 / SAMPLE_RATE)
+        # Ignore le DC
+        spectrum[0] = 0
+        return float(freqs[int(np.argmax(spectrum))])
+
+    n_trials = 10
+    freqs_low = [dominant_freq(generate_signal(0, 1.0)[1]) for _ in range(n_trials)]
+    freqs_high = [dominant_freq(generate_signal(20, 1.0)[1]) for _ in range(n_trials)]
+
+    # Au moins un chevauchement entre min(20%) et max(0%) (les ranges se croisent)
+    assert max(freqs_low) > min(freqs_high) or min(freqs_low) < max(freqs_high), (
+        "Les distributions de fréquence des classes 0 et 20 doivent se chevaucher"
+    )
