@@ -190,8 +190,17 @@ def render_training_mode():
         elif status == "training":
             st.info(f"🔄 Entraînement en cours... (Loss: {train_prog.get('loss', 0):.4f})")
         elif status == "waiting_data":
-            msg = train_prog.get("message", "Attente de données...")
-            st.warning(f"⏳ {msg}")
+            msg = train_prog.get("message", "")
+            # On évite de dupliquer l'info de la barre Phase 1 : si le training
+            # attend juste la fin de l'acquisition, on affiche un message
+            # générique. En revanche, l'avancée de la transformation des
+            # spectrogrammes est une étape distincte et utile à voir ici.
+            if msg.startswith("Transformation"):
+                st.info(f"⏳ {msg}")
+            elif msg.startswith("Acquisition"):
+                st.caption("🔒 En attente de la fin de la génération (voir Phase 1).")
+            else:
+                st.warning(f"⏳ {msg or 'Attente de données...'}")
         elif status == "starting":
             st.info("🚀 Initialisation de l'entraînement...")
         else:
