@@ -80,6 +80,9 @@ services:
       - TIMESCALE_USER=${TIMESCALE_USER}
       - TIMESCALE_PASSWORD=${TIMESCALE_PASSWORD}
       - TIMESCALE_DB=${TIMESCALE_DB}
+      # Options de simulation (défauts sûrs si non définies dans .env)
+      - LABEL_NOISE_RATE=${LABEL_NOISE_RATE:-0.0}
+      - FORCE_CLEAN=${FORCE_CLEAN:-false}
     depends_on:
       timescale_db:
         condition: service_healthy
