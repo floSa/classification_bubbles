@@ -33,12 +33,6 @@ Ce projet simule une usine, génère des données de capteurs (audio), les trait
     *   Sous WSL2 : Installer les [drivers NVIDIA pour WSL](https://developer.nvidia.com/cuda/wsl).
 *   Un fichier `.env` configuré (voir `.env.example`).
 
-### Variables d'environnement notables
-| Variable | Défaut | Effet |
-|----------|--------|-------|
-| `LABEL_NOISE_RATE` | `0.0` | Probabilité par chunk de stocker un mauvais label (simule un capteur imparfait). 0.03–0.05 = réaliste. |
-| `FORCE_CLEAN` | `false` | Si `true` au démarrage de `acquisition`, purge `audio_data` et supprime le modèle entraîné. À n'utiliser que pour repartir de zéro. |
-
 ### Configuration initiale (WSL2)
 ```bash
 # Copier le fichier d'environnement
@@ -49,15 +43,62 @@ docker --version
 docker compose version
 ```
 
-### Lancement (sans training)
+### 🚦 Les deux modes de lancement
+
+Le projet a **deux modes** distincts. Choisis le bon selon ce que tu veux faire.
+
+#### Mode 1 — Génération + entraînement (premier démarrage ou ré-entraînement)
+```bash
+make train
+```
+Équivalent direct sans `make` :
+```bash
+docker compose --profile training down -v   # purge volumes (DB + spectros)
+rm -f models/*.pth models/*.json             # purge modèle + progress
+docker compose --profile training up -d --build
+```
+
+Ce que ça fait :
+- **Reset complet** : volumes TimescaleDB / MongoDB / MinIO supprimés, modèle effacé.
+- **Génère 1h** de données simulées avec le nouveau modèle physique stochastique.
+- **Extrait + spectrogramme** chaque bulle.
+- **Entraîne MobileNetV2** (10 epochs, ~5-15 min sur GPU).
+- Le service `training` détruit automatiquement l'ancien `.pth` avant de relancer un training (sauf si `KEEP_MODEL=true`).
+
+Le dashboard ([localhost:8501](http://localhost:8501)) reste sur la **vue training** (barres de progression) tant que l'entraînement est en cours — il ne bascule en vue temps réel **qu'à la fin** du training, pour ne pas être pollué par les données live qui arrivent en parallèle.
+
+#### Mode 2 — Monitoring uniquement
+```bash
+make run
+```
+Équivalent direct :
 ```bash
 docker compose up -d --build
 ```
 
-### Lancement avec Training
-```bash
-docker compose --profile training up -d --build
-```
+Ce que ça fait :
+- Lance acquisition / extraction / transformation / inference / dashboard.
+- **Ne lance pas le training** (profile `training` désactivé).
+- Réutilise les données et le modèle déjà présents.
+
+**Si données ou modèle manquent**, le dashboard affiche un écran "Configuration initiale requise" avec la commande `make train` à exécuter — le service ne tente pas de fonctionner à moitié.
+
+### Autres commandes Makefile
+
+| Commande | Effet |
+|----------|-------|
+| `make help`   | Liste toutes les commandes disponibles |
+| `make stop`   | Stoppe les conteneurs sans toucher aux volumes ni au modèle |
+| `make clean`  | `stop` + suppression des volumes et du modèle (état totalement vierge) |
+| `make logs`   | Suit `docker logs -f bubble_training` |
+| `make status` | Affiche `docker compose ps` + état modèle/progression |
+
+### Variables d'environnement notables
+| Variable | Défaut | Effet |
+|----------|--------|-------|
+| `LABEL_NOISE_RATE` | `0.0` | Probabilité par chunk de stocker un mauvais label (simule un capteur imparfait). 0.03–0.05 = réaliste. |
+| `FORCE_CLEAN` | `false` | Si `true`, le service acquisition purge `audio_data` au démarrage. Redondant avec `make train` qui purge les volumes ; utile en cas de redémarrage partiel. |
+| `KEEP_MODEL` | `false` | Si `true` côté training, conserve l'ancien `.pth` et passe en mode standby au lieu de ré-entraîner. Pour debug. |
 
 *(La première construction peut prendre quelques minutes)*
 

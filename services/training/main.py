@@ -320,12 +320,23 @@ def main():
         os.makedirs(MODELS_DIR, exist_ok=True)
         logger.info(f"📁 Dossier {MODELS_DIR} créé.")
 
-    # 1. Vérifier si un modèle existe déjà
+    # 1. Gestion du modèle existant
+    #    Par défaut, lancer le service de training = vouloir ré-entraîner.
+    #    On supprime l'ancien modèle pour repartir propre.
+    #    KEEP_MODEL=true pour préserver l'ancien modèle (mode debug / standby).
+    keep_model = os.getenv("KEEP_MODEL", "false").lower() == "true"
     if check_model_exists():
-        logger.info(f"✅ Un modèle existe déjà ({MODEL_FILENAME}).")
-        logger.info("Le service passe en mode attente. Relancez manuellement pour forcer le ré-entraînement.")
-        while True:
-            time.sleep(3600)
+        if keep_model:
+            logger.info(f"✅ Modèle existant ({MODEL_FILENAME}) conservé (KEEP_MODEL=true).")
+            logger.info("Le service passe en mode attente.")
+            while True:
+                time.sleep(3600)
+        else:
+            logger.info(f"♻️ Modèle existant détecté ({MODEL_FILENAME}). Suppression pour ré-entraînement.")
+            try:
+                os.remove(os.path.join(MODELS_DIR, MODEL_FILENAME))
+            except OSError as e:
+                logger.warning(f"Impossible de supprimer l'ancien modèle: {e}")
     
     # 2. Vérifier si TimescaleDB contient des données brutes
     logger.info("🔍 Vérification des données brutes dans TimescaleDB...")

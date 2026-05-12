@@ -64,10 +64,25 @@ def is_training_finished() -> bool:
     """Vérifie si l'entraînement est terminé (100%)."""
     if not os.path.exists(TRAINING_PROGRESS_FILE):
         return False
-        
+
     try:
         train_prog = load_json_file(TRAINING_PROGRESS_FILE)
         return train_prog.get("status") == "completed"
+    except Exception:
+        return False
+
+
+def is_training_active() -> bool:
+    """
+    Vrai si le training tourne réellement (starting / training / waiting_data).
+    Permet d'afficher la progression de l'entraînement plutôt que la vue
+    temps réel, même si un ancien modèle existe encore sur disque.
+    """
+    if not os.path.exists(TRAINING_PROGRESS_FILE):
+        return False
+    try:
+        train_prog = load_json_file(TRAINING_PROGRESS_FILE)
+        return train_prog.get("status") in ("starting", "training", "waiting_data")
     except Exception:
         return False
 
@@ -296,28 +311,76 @@ def render_realtime_mode():
 # POINT D'ENTRÉE
 # =============================================================================
 
+def render_bootstrap_required():
+    """
+    Affiché quand on est en mode normal (sans le profil training) mais qu'il
+    manque le modèle ou les données pour fonctionner. On indique à l'utilisateur
+    la commande à lancer pour amorcer le système.
+    """
+    st.title("🚀 Configuration initiale requise")
+
+    missing_model = not model_exists()
+    acq_prog = load_json_file(ACQUISITION_PROGRESS_FILE)
+    acq_status = acq_prog.get("status", "unknown")
+    missing_data = acq_status != "completed"
+
+    if missing_model and missing_data:
+        st.warning("Aucun modèle entraîné ni données de simulation détectés.")
+    elif missing_model:
+        st.warning("Aucun modèle entraîné détecté (les données sont présentes).")
+    elif missing_data:
+        st.warning("Données de simulation manquantes (le modèle est présent).")
+
+    st.markdown("---")
+    st.subheader("Pour démarrer le système :")
+    st.markdown(
+        "Lance cette commande à la racine du projet — elle va **générer 1h de données simulées** "
+        "puis **entraîner le modèle MobileNetV2** :"
+    )
+    st.code("make train", language="bash")
+    st.caption(
+        "Équivalent direct : `docker compose --profile training down -v && "
+        "rm -f models/* && docker compose --profile training up -d --build`"
+    )
+
+    st.markdown("---")
+    st.markdown("Une fois l'entraînement terminé, tu pourras relancer le mode monitoring avec :")
+    st.code("make run", language="bash")
+
+    st.markdown("---")
+    st.info(
+        "💡 Tu peux suivre la progression de l'entraînement en direct sur ce dashboard, "
+        "ou via `docker logs -f bubble_training`."
+    )
+
+
 if __name__ == "__main__":
     try:
-        # Déterminer l'intervalle de rafraîchissement dynamiquement
+        # Intervalle de rafraîchissement adaptatif
         refresh_ms = determine_refresh_interval()
         st_autorefresh(interval=refresh_ms, limit=None, key="auto_refresh")
-        
-        # 1. Charger l'état de l'acquisition
+
         acq_prog = load_json_file(ACQUISITION_PROGRESS_FILE)
         acq_status = acq_prog.get("status", "unknown")
-        
-        # 2. Si l'acquisition est en cours (ou pas commencée), on force le mode Training View
-        if acq_status != "completed":
+
+        # 1. Le training tourne en ce moment → on affiche sa progression
+        #    (même si un ancien modèle traîne encore sur disque).
+        if is_training_active():
             render_training_mode()
-        
-        # 3. Si acquisition finie, on regarde si le training est fini OU si modèle existe
-        elif is_training_finished() or model_exists():
+
+        # 2. Acquisition pas finie → training view (barres de progression).
+        elif acq_status != "completed":
+            render_training_mode()
+
+        # 3. Modèle prêt + données prêtes → monitoring temps réel.
+        elif model_exists():
             render_realtime_mode()
-            
-        # 4. Sinon (acquisition finie mais training pas fini), on reste en Training View
+
+        # 4. Cas normal sans training en cours mais sans modèle / données :
+        #    on affiche un écran qui guide l'utilisateur vers `make train`.
         else:
-            render_training_mode()
-            
+            render_bootstrap_required()
+
     except Exception as e:
         st.error(f"❌ Erreur critique : {e}")
         import traceback

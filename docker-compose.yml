@@ -164,6 +164,8 @@ services:
       - MINIO_ENDPOINT=minio-db:9000
       - MINIO_ACCESS_KEY=${MINIO_ROOT_USER}
       - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD}
+      # KEEP_MODEL=true → conserve l'ancien modèle au lieu de ré-entraîner.
+      - KEEP_MODEL=${KEEP_MODEL:-false}
     volumes:
       - ./models:/app/models
     depends_on:
