@@ -65,7 +65,7 @@ Ce que ça fait :
 - **Entraîne MobileNetV2** (10 epochs, ~5-15 min sur GPU).
 - Le service `training` détruit automatiquement l'ancien `.pth` avant de relancer un training (sauf si `KEEP_MODEL=true`).
 
-Le dashboard ([localhost:8501](http://localhost:8501)) reste sur la **vue training** (barres de progression) tant que l'entraînement est en cours — il ne bascule en vue temps réel **qu'à la fin** du training, pour ne pas être pollué par les données live qui arrivent en parallèle.
+Le dashboard ([localhost:8503](http://localhost:8503)) reste sur la **vue training** (barres de progression) tant que l'entraînement est en cours — il ne bascule en vue temps réel **qu'à la fin** du training, pour ne pas être pollué par les données live qui arrivent en parallèle.
 
 #### Mode 2 — Monitoring uniquement
 ```bash
@@ -103,7 +103,7 @@ Ce que ça fait :
 *(La première construction peut prendre quelques minutes)*
 
 ### Accès
-*   **Dashboard Streamlit**: [http://localhost:8501](http://localhost:8501)
+*   **Dashboard Streamlit**: [http://localhost:8503](http://localhost:8503)
 *   **API Inference**: [http://localhost:8000/health](http://localhost:8000/health)
 *   **MinIO Console**: [http://localhost:9001](http://localhost:9001) (User: `minioadmin`, Pass: `minioadmin`)
 *   **MongoDB Compass**: `mongodb://root:password@localhost:27018/`

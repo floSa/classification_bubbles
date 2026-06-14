@@ -5,6 +5,7 @@ services:
   timescale_db:
     image: timescale/timescaledb:latest-pg14
     container_name: bubble_timescale
+    restart: unless-stopped
     environment:
       - POSTGRES_USER=${TIMESCALE_USER}
       - POSTGRES_PASSWORD=${TIMESCALE_PASSWORD}
@@ -25,6 +26,7 @@ services:
   mongo_db:
     image: mongo:latest
     container_name: bubble_mongo
+    restart: unless-stopped
     environment:
       - MONGO_INITDB_ROOT_USERNAME=${MONGO_ROOT_USER}
       - MONGO_INITDB_ROOT_PASSWORD=${MONGO_ROOT_PASSWORD}
@@ -38,6 +40,7 @@ services:
   minio-db:
     image: minio/minio:latest
     container_name: bubble_minio
+    restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
       - MINIO_ROOT_USER=${MINIO_ROOT_USER}
@@ -90,7 +93,7 @@ services:
       - ./models:/app/models
     networks:
       - bubble_net
-    restart: always
+    restart: unless-stopped
 
   extraction:
     build:
@@ -114,7 +117,7 @@ services:
         condition: service_started
     networks:
       - bubble_net
-    restart: always
+    restart: unless-stopped
 
   transformation:
     build:
@@ -136,7 +139,7 @@ services:
         condition: service_healthy
     networks:
       - bubble_net
-    restart: always
+    restart: unless-stopped
 
   training:
     build:
@@ -184,7 +187,7 @@ services:
       dockerfile: services/inference/Dockerfile
     container_name: bubble_inference
     ports:
-      - "8000:8000"
+      - "8010:8000"
     deploy:
       resources:
         reservations:
@@ -210,7 +213,7 @@ services:
     networks:
       - bubble_net
     shm_size: 2gb
-    restart: always
+    restart: unless-stopped
 
   app:
     build:
@@ -218,7 +221,7 @@ services:
       dockerfile: services/app/Dockerfile
     container_name: bubble_dashboard
     ports:
-      - "8501:8501"
+      - "8503:8501"
     environment:
       - TIMESCALE_HOST=timescale_db
       - TIMESCALE_PORT=5432
