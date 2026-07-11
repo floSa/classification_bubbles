@@ -122,3 +122,48 @@ pytest tests/ -v
 | `GET /predict/{bubble_id}` | Prédiction pour une bulle |
 
 L'API effectue également un polling automatique de MongoDB pour prédire les nouvelles bulles.
+
+## 📜 Licences & composants
+
+Licences des composants tiers réellement utilisés (images Docker et dépendances Python des services). Une licence non vérifiée avec certitude est marquée `<à confirmer>`.
+
+### Stores (images Docker)
+
+| Composant | Rôle | Licence |
+|-----------|------|---------|
+| TimescaleDB (`timescale/timescaledb:latest-pg14`) | Base séries temporelles (audio brut) | Apache 2.0 (core) / Timescale License – TSL (fonctions community) |
+| PostgreSQL 14 (base de TimescaleDB) | Moteur SQL sous-jacent | PostgreSQL License (BSD-like) |
+| MongoDB (`mongo:latest`) | Feature Store (métadonnées + prédictions) | SSPL v1 (Server Side Public License) |
+| MinIO (`minio/minio:latest`) | Data Lake objet (spectrogrammes) | GNU AGPL v3 |
+| MinIO Client `mc` (`minio/mc`) | Init des buckets | GNU AGPL v3 |
+
+### Bibliothèques Python majeures
+
+| Composant | Rôle | Licence |
+|-----------|------|---------|
+| PyTorch (`torch`) | Entraînement / inférence ML (GPU) | BSD 3-Clause |
+| torchvision | Modèle MobileNetV2 + transforms | BSD 3-Clause |
+| FastAPI | API REST d'inférence | MIT |
+| Uvicorn | Serveur ASGI de l'API | BSD 3-Clause |
+| Streamlit | Dashboard temps réel | Apache 2.0 |
+| streamlit-autorefresh | Rafraîchissement auto du dashboard | `<à confirmer>` (probable MIT) |
+| pandas | Manipulation de données (dashboard) | BSD 3-Clause |
+| NumPy | Calcul numérique | BSD 3-Clause |
+| SciPy | Traitement du signal (extraction/DSP) | BSD 3-Clause |
+| Pillow | Génération/lecture des spectrogrammes PNG | MIT-CMU (HPND) |
+| psycopg2-binary | Client PostgreSQL/TimescaleDB | LGPL v3 (avec exception OpenSSL) |
+| pymongo | Client MongoDB | Apache 2.0 |
+| minio (client Python) | Client S3/MinIO | Apache 2.0 |
+| requests | Client HTTP (dashboard → API) | Apache 2.0 |
+| python-dotenv | Chargement des variables d'environnement | BSD 3-Clause |
+| pytest / pytest-cov | Tests unitaires (dev) | MIT |
+
+### Poids du modèle
+
+| Composant | Rôle | Licence |
+|-----------|------|---------|
+| Poids pré-entraînés MobileNetV2 (torchvision, ImageNet) | Initialisation du modèle si utilisée | `<à confirmer>` (poids torchvision / conditions ImageNet) |
+
+### Code du projet
+
+MIT — Copyright (c) 2026 floSa `<à confirmer : pas de fichier LICENSE>`
