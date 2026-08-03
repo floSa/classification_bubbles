@@ -17,6 +17,11 @@ Le service d'entraînement crée un modèle de classification CNN sur les spectr
 FROM pytorch/pytorch:2.1.0-cuda12.1-cudnn8-runtime
 ```
 
+C'est cette image qui fixe la version de PyTorch : elle fournit torch 2.1.0 et
+pip ne remonte pas au-dessus. Les planchers `torch>=2.1.0` /
+`torchvision>=0.16.0` de `requirements.txt` décrivent donc ce qui tourne
+réellement ; les relever suppose de changer l'image de base.
+
 ## Architecture du Modèle
 
 - **Base** : MobileNetV2 pré-entraîné sur ImageNet

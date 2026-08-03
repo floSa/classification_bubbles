@@ -18,6 +18,11 @@ FROM pytorch/pytorch:2.1.0-cuda12.1-cudnn8-runtime
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
 ```
 
+C'est cette image qui fixe la version de PyTorch : elle fournit torch 2.1.0 et
+pip ne remonte pas au-dessus. Les planchers `torch>=2.1.0` /
+`torchvision>=0.16.0` de `requirements.txt` décrivent donc ce qui tourne
+réellement ; les relever suppose de changer l'image de base.
+
 ## API REST
 
 ### Endpoints
