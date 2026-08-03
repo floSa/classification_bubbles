@@ -1,5 +1,11 @@
-pytest>=7.0
+pytest>=8.0
 pytest-cov
 numpy
 scipy
 Pillow
+# importes indirectement par services/common/__init__.py, sans quoi la
+# collecte pytest echoue des le premier import
+python-dotenv
+psycopg2-binary
+pymongo
+minio

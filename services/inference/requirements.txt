@@ -1,8 +1,11 @@
 psycopg2-binary
 fastapi
 uvicorn[standard]
-torch>=2.0.0
-torchvision>=0.15.0
+# l'image de base pytorch/pytorch:2.1.0-cuda12.1 fournit deja torch 2.1.0 :
+# ces planchers documentent ce qui est reellement installe, ils ne declenchent
+# aucun telechargement. Les relever suppose de changer l'image de base.
+torch>=2.1.0
+torchvision>=0.16.0
 numpy
 pymongo
 minio
